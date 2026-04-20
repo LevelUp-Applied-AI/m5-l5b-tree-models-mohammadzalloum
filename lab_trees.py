@@ -16,6 +16,8 @@ from sklearn.metrics import (
     average_precision_score,
     classification_report,
     recall_score,
+    precision_score,
+    f1_score,
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -247,6 +249,82 @@ def plot_pr_curves(rf_default, rf_balanced, X_test, y_test, output_path):
     plt.close(fig)
 
 
+
+def threshold_sweep_balanced_rf(model, X_test, y_test, output_path):
+    """Sweep thresholds for a balanced RF and plot precision/recall/F1.
+
+    Args:
+        model: Trained classifier with predict_proba.
+        X_test: Test features.
+        y_test: True test labels.
+        output_path: Where to save the figure.
+
+    Returns:
+        Dict containing:
+          - best_f1_threshold
+          - best_f1
+          - recall_80_threshold
+          - metrics_table (list of dicts)
+    """
+    thresholds = np.round(np.arange(0.10, 0.91, 0.05), 2)
+    y_prob = model.predict_proba(X_test)[:, 1]
+
+    metrics_table = []
+
+    for threshold in thresholds:
+        y_pred = (y_prob >= threshold).astype(int)
+
+        precision = precision_score(y_test, y_pred, zero_division=0)
+        recall = recall_score(y_test, y_pred, zero_division=0)
+        f1 = f1_score(y_test, y_pred, zero_division=0)
+
+        metrics_table.append({
+            "threshold": float(threshold),
+            "precision": float(precision),
+            "recall": float(recall),
+            "f1": float(f1),
+            "predicted_positive_count": int(y_pred.sum()),
+        })
+
+    # best threshold by F1
+    best_row = max(metrics_table, key=lambda row: row["f1"])
+    best_f1_threshold = best_row["threshold"]
+    best_f1 = best_row["f1"]
+
+    # first threshold that achieves recall >= 0.80
+    recall_80_candidates = [row for row in metrics_table if row["recall"] >= 0.80]
+    recall_80_threshold = recall_80_candidates[0]["threshold"] if recall_80_candidates else None
+
+    # Plot precision, recall, and F1
+    x = [row["threshold"] for row in metrics_table]
+    precision_values = [row["precision"] for row in metrics_table]
+    recall_values = [row["recall"] for row in metrics_table]
+    f1_values = [row["f1"] for row in metrics_table]
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(x, precision_values, marker="o", label="Precision")
+    ax.plot(x, recall_values, marker="o", label="Recall")
+    ax.plot(x, f1_values, marker="o", label="F1")
+
+    ax.set_title("Threshold Sweep (Balanced Random Forest)")
+    ax.set_xlabel("Threshold")
+    ax.set_ylabel("Score")
+    ax.set_xticks(x)
+    ax.set_ylim(0, 1.05)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+    fig.savefig(output_path, dpi=100, bbox_inches="tight")
+    plt.close(fig)
+
+    return {
+        "best_f1_threshold": float(best_f1_threshold),
+        "best_f1": float(best_f1),
+        "recall_80_threshold": None if recall_80_threshold is None else float(recall_80_threshold),
+        "metrics_table": metrics_table,
+    }
+
+
 def plot_calibration_curves(rf_default, rf_balanced, X_test, y_test, output_path):
     """Plot calibration curves for both RF models and save as PNG."""
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -421,6 +499,21 @@ def main():
             rf, rf_bal, X_test, y_test, "results/calibration_curves.png"
         )
 
+        # Tier 1 challenge: threshold tuning
+        sweep = threshold_sweep_balanced_rf(
+            rf_bal, X_test, y_test, "results/threshold_sweep.png"
+        )
+
+        print("\n--- Tier 1: Threshold sweep (balanced RF) ---")
+        print(f"Best F1 threshold: {sweep['best_f1_threshold']:.2f}")
+        print(f"Best F1 score:      {sweep['best_f1']:.3f}")
+
+        if sweep["recall_80_threshold"] is not None:
+            print(f"Threshold achieving recall >= 0.80: {sweep['recall_80_threshold']:.2f}")
+        else:
+            print("No threshold in the sweep achieved recall >= 0.80.")
+
+
     # Task 6: Tree-vs-linear disagreement
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
@@ -441,6 +534,10 @@ def main():
     print("  - results/decision_tree.png")
     print("  - results/pr_curves.png")
     print("  - results/calibration_curves.png")
+    print("  - results/threshold_sweep.png")
+
+    #challenge
+
 
 
 if __name__ == "__main__":
